@@ -23,15 +23,24 @@ jobs:
           pip install -r requirements.txt
         working-directory: ./
 
-      - name: Run daily fetch
+      - name: Sheets healthcheck
         env:
-          DOC_SEARCH: ${{ vars.DOC_SEARCH }}
-          ENTITY_SEARCH: ${{ vars.ENTITY_SEARCH }}
-          FORMS: ${{ vars.FORMS }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           WORKSHEET_NAME: ${{ secrets.WORKSHEET_NAME }}
-          TIME_OVERRIDE: ${{ secrets.TIME_OVERRIDE }}
         run: |
-          python run_daily.py
+          python - <<'PY'
+          import os, json, gspread
+          from google.oauth2.service_account import Credentials
+          creds = Credentials.from_service_account_info(json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]),
+                                                        scopes=["https://www.googleapis.com/auth/spreadsheets"])
+          gc = gspread.authorize(creds)
+          sh = gc.open_by_key(os.environ["SPREADSHEET_ID"].split("/spreadsheets/d/")[-1].split("/")[0])
+          try:
+              ws = sh.worksheet(os.environ["WORKSHEET_NAME"])
+          except Exception:
+              ws = sh.add_worksheet(title=os.environ["WORKSHEET_NAME"], rows=100, cols=26)
+          ws.append_row(["healthcheck", "ok"])
+          print("Healthcheck appended")
+          PY
         working-directory: ./
