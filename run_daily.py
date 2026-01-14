@@ -258,7 +258,16 @@ def authorize_gspread_from_env():
 
 def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
     sh = gc.open_by_key(spreadsheet_id)
-    wks = sh.worksheet(worksheet_title)
+    # Ensure worksheet exists; create if missing
+    try:
+        wks = sh.worksheet(worksheet_title)
+    except Exception:
+        # Attempt to create the worksheet if not found
+        try:
+            wks = sh.add_worksheet(title=worksheet_title, rows=100, cols=26)
+            print(f"Created missing worksheet '{worksheet_title}'.")
+        except Exception as e:
+            raise e
     headers = list(df.columns)
     rows = df.astype(object).where(pd.notnull(df), "").values.tolist()
     try:
@@ -354,8 +363,15 @@ def main():
         df.insert(1, "Time", export_time)
     print(f"Found {len(df)} filings")
 
-    # Optional Google Sheets write
-    spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    # Optional Google Sheets write (supports ID or full URL)
+    def resolve_spreadsheet_id(value: str | None) -> str | None:
+        if not value:
+            return None
+        m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", value)
+        return m.group(1) if m else value.strip()
+
+    spreadsheet_value = os.getenv("SPREADSHEET_ID") or os.getenv("SPREADSHEET_URL")
+    spreadsheet_id = resolve_spreadsheet_id(spreadsheet_value)
     worksheet_name = os.getenv("WORKSHEET_NAME", "Sheet1")
     if spreadsheet_id and not df.empty:
         gc = authorize_gspread_from_env()
