@@ -369,7 +369,6 @@ def main():
         if 'worksheet_names' in st.session_state and st.session_state.get('worksheet_names'):
             st.selectbox("Worksheet:", st.session_state['worksheet_names'], key="selected_worksheet")
             st.caption("The selected worksheet will be used for future exports.")
-            st.checkbox("Write results to spreadsheet", key="write_to_sheet")
         run_button = st.button("🔎 Fetch Filings", type="primary")
 
     if run_button:
@@ -419,10 +418,9 @@ def main():
                     mime='text/csv'
                 )
 
-            # Optional: write to Google Sheet when enabled and connected
+            # Write to Google Sheet when connected
             if (
                 not df.empty and
-                st.session_state.get('write_to_sheet') and
                 gspread is not None and Credentials is not None and
                 st.session_state.get('gspread_client') and
                 st.session_state.get('spreadsheet_id') and
