@@ -293,9 +293,10 @@ def main():
     doc_search = os.getenv("DOC_SEARCH", "")
     entity_search = os.getenv("ENTITY_SEARCH", "")
 
-    # Date range: previous day by default
-    to_date = datetime.utcnow().date()
-    from_date = to_date - timedelta(days=1)
+    # Date range: strictly yesterday (UTC) only
+    yesterday = datetime.utcnow().date() - timedelta(days=1)
+    from_date = yesterday
+    to_date = yesterday
 
     date_range_str = "custom"
     category = "custom"
