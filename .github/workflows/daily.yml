@@ -31,6 +31,7 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           WORKSHEET_NAME: ${{ secrets.WORKSHEET_NAME }}
+          TIME_OVERRIDE: ${{ secrets.TIME_OVERRIDE }}
         run: |
           python run_daily.py
         working-directory: ./
