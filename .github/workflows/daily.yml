@@ -2,7 +2,7 @@ name: Daily SEC Fetch
 
 on:
   schedule:
-    - cron: "51 12 * * *" # 6:00 AM UTC daily
+    - cron: "59 12 * * *" # 6:00 AM UTC daily
   workflow_dispatch:
 
 jobs:
