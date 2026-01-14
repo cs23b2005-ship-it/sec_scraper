@@ -3,7 +3,7 @@ import json
 import re
 import time
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 import pandas as pd
@@ -294,7 +294,7 @@ def main():
     entity_search = os.getenv("ENTITY_SEARCH", "")
 
     # Date range: strictly yesterday (UTC) only
-    yesterday = datetime.utcnow().date() - timedelta(days=1)
+    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
     from_date = yesterday
     to_date = yesterday
 
@@ -331,7 +331,23 @@ def main():
 
     df = pd.DataFrame(all_filings)
     if not df.empty:
-        export_time = datetime.utcnow().strftime("%H:%M")
+        # Allow override via env var for testing (formats: HH:MM or h:mm AM/PM)
+        def _parse_time_override(s: str) -> str | None:
+            if not s:
+                return None
+            s_norm = s.strip()
+            try:
+                return datetime.strptime(s_norm, "%H:%M").strftime("%H:%M")
+            except Exception:
+                pass
+            try:
+                return datetime.strptime(s_norm.upper(), "%I:%M %p").strftime("%H:%M")
+            except Exception:
+                return None
+
+        override = os.getenv("TIME_OVERRIDE", "")
+        parsed = _parse_time_override(override)
+        export_time = parsed if parsed else datetime.now(timezone.utc).strftime("%H:%M")
         date_col = df.get("Filed")
         formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
         df.insert(0, "Date", formatted_dates)
