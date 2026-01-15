@@ -297,10 +297,13 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
 
 
 def main():
-    # Defaults
-    forms_str = os.getenv("FORMS", "10-K,10-Q,8-K,DEF 14A")
-    doc_search = os.getenv("DOC_SEARCH", "")
-    entity_search = os.getenv("ENTITY_SEARCH", "")
+    # Defaults with robust env handling: ignore empty strings
+    forms_env = os.getenv("FORMS", "").strip()
+    forms_str = forms_env if forms_env else "10-K,10-Q,8-K,DEF 14A"
+    doc_env = os.getenv("DOC_SEARCH", "")
+    entity_env = os.getenv("ENTITY_SEARCH", "")
+    doc_search = doc_env.strip() if doc_env else ""
+    entity_search = entity_env.strip() if entity_env else ""
 
     # Date range: strictly yesterday (UTC) only
     yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
@@ -313,6 +316,7 @@ def main():
     page = 1
     FILINGS_PER_PAGE = int(os.getenv("PAGE_SIZE", "100"))
 
+    print(f"Filters: forms='{forms_str}', doc='{doc_search}', entity='{entity_search}'")
     all_filings = []
     while True:
         from_ = (page - 1) * FILINGS_PER_PAGE
@@ -362,6 +366,8 @@ def main():
         df.insert(0, "Date", formatted_dates)
         df.insert(1, "Time", export_time)
     print(f"Found {len(df)} filings")
+    if df.empty:
+        print("No filings found; check filters and date range.")
 
     # Optional Google Sheets write (supports ID or full URL)
     def resolve_spreadsheet_id(value: str | None) -> str | None:
