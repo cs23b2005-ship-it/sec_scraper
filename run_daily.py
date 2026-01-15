@@ -284,8 +284,10 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
         if need_headers:
             wks.update("A1", [headers], value_input_option='USER_ENTERED')
             existing = [headers]  # reflect header written
-        start_row = len(existing) + 1
-        wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
+        # Only write data rows if there are any
+        if rows:
+            start_row = len(existing) + 1
+            wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception as e:
         # Fallback: write each row explicitly to avoid alignment issues
         try:
@@ -293,12 +295,13 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
                 wks.update("A1", [headers], value_input_option='USER_ENTERED')
         except Exception:
             pass
-        base_row = 2 if need_headers else len(existing) + 1
-        for i, r in enumerate(rows):
-            try:
-                wks.update(f"A{base_row + i}", [r], value_input_option='USER_ENTERED')
-            except Exception:
-                pass
+        if rows:
+            base_row = 2 if need_headers else len(existing) + 1
+            for i, r in enumerate(rows):
+                try:
+                    wks.update(f"A{base_row + i}", [r], value_input_option='USER_ENTERED')
+                except Exception:
+                    pass
 
 
 def main():
@@ -348,6 +351,12 @@ def main():
         time.sleep(0.2)
 
     df = pd.DataFrame(all_filings)
+    # Define canonical headers so we can write header-only when there are no filings
+    expected_headers = [
+        "Date", "Time", "Form", "File", "File description", "URL", "Filing Detail", "size",
+        "Filed", "Reporting For", "Filing entity", "Filing entity located", "Filing entity incorporated",
+        "Filer name", "Filer located", "Filer incorporated", "Symbol", "CIK"
+    ]
     if not df.empty:
         # Allow override via env var for testing (formats: HH:MM or h:mm AM/PM)
         def _parse_time_override(s: str) -> str | None:
@@ -371,6 +380,9 @@ def main():
         formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
         df.insert(0, "Date", formatted_dates)
         df.insert(1, "Time", export_time)
+    else:
+        # Build an empty DataFrame with the expected headers for header-only write
+        df = pd.DataFrame(columns=expected_headers)
     print(f"Found {len(df)} filings")
     if df.empty:
         print("No filings found; check filters and date range.")
@@ -385,12 +397,15 @@ def main():
     spreadsheet_value = os.getenv("SPREADSHEET_ID") or os.getenv("SPREADSHEET_URL")
     spreadsheet_id = resolve_spreadsheet_id(spreadsheet_value)
     worksheet_name = os.getenv("WORKSHEET_NAME", "Sheet1")
-    if spreadsheet_id and not df.empty:
+    if spreadsheet_id:
         gc = authorize_gspread_from_env()
         if gc is not None:
             try:
                 write_df_to_sheet(gc, spreadsheet_id, worksheet_name, df)
-                print("✅ Results appended to the spreadsheet.")
+                if df.empty:
+                    print("📝 Wrote headers only (no filings today).")
+                else:
+                    print("✅ Results appended to the spreadsheet.")
             except Exception as e:
                 print(f"Failed to write to spreadsheet: {e}")
         else:
