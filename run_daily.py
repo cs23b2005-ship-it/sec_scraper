@@ -4,6 +4,7 @@ import re
 import time
 import random
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 import pandas as pd
@@ -364,7 +365,8 @@ def main():
 
         override = os.getenv("TIME_OVERRIDE", "")
         parsed = _parse_time_override(override)
-        export_time = parsed if parsed else datetime.now(timezone.utc).strftime("%H:%M")
+        ist = ZoneInfo("Asia/Kolkata")
+        export_time = parsed if parsed else datetime.now(ist).strftime("%H:%M")
         date_col = df.get("Filed")
         formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
         df.insert(0, "Date", formatted_dates)
