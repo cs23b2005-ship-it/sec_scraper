@@ -269,6 +269,14 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
         except Exception as e:
             raise e
 
+    # Helper: convert 1-based column index to A1 letter (supports beyond Z)
+    def col_letter(n: int) -> str:
+        s = ""
+        while n > 0:
+            n, r = divmod(n - 1, 26)
+            s = chr(65 + r) + s
+        return s
+
     headers = list(df.columns)
     rows = df.astype(object).where(pd.notnull(df), "").values.tolist()
 
@@ -277,26 +285,33 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
         existing = wks.get_all_values()
     except Exception:
         existing = []
-    need_headers = len(existing) == 0
+    # Write headers if the first row is empty (even if there are values below)
+    try:
+        first_row = wks.row_values(1)
+    except Exception:
+        first_row = []
+    first_row_empty = (len(first_row) == 0) or all((v or "").strip() == "" for v in first_row)
 
     # Always write using explicit A1 ranges to start at column A
     try:
-        if need_headers:
-            wks.update("A1", [headers], value_input_option='USER_ENTERED')
-            existing = [headers]  # reflect header written
+        if first_row_empty:
+            end_col = col_letter(len(headers)) if headers else "A"
+            wks.update(f"A1:{end_col}1", [headers], value_input_option='USER_ENTERED')
         # Only write data rows if there are any
         if rows:
-            start_row = len(existing) + 1
+            # If sheet was previously empty and we just wrote headers, start at row 2; else append after last non-empty row
+            start_row = 2 if (first_row_empty and len(existing) == 0) else (len(existing) + 1)
             wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception as e:
         # Fallback: write each row explicitly to avoid alignment issues
         try:
-            if need_headers:
-                wks.update("A1", [headers], value_input_option='USER_ENTERED')
+            if first_row_empty:
+                end_col = col_letter(len(headers)) if headers else "A"
+                wks.update(f"A1:{end_col}1", [headers], value_input_option='USER_ENTERED')
         except Exception:
             pass
         if rows:
-            base_row = 2 if need_headers else len(existing) + 1
+            base_row = 2 if (first_row_empty and len(existing) == 0) else (len(existing) + 1)
             for i, r in enumerate(rows):
                 try:
                     wks.update(f"A{base_row + i}", [r], value_input_option='USER_ENTERED')
