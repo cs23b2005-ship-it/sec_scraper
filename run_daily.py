@@ -262,36 +262,40 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
     try:
         wks = sh.worksheet(worksheet_title)
     except Exception:
-        # Attempt to create the worksheet if not found
         try:
             wks = sh.add_worksheet(title=worksheet_title, rows=100, cols=26)
             print(f"Created missing worksheet '{worksheet_title}'.")
         except Exception as e:
             raise e
+
     headers = list(df.columns)
     rows = df.astype(object).where(pd.notnull(df), "").values.tolist()
+
+    # Determine existing row count safely
     try:
         existing = wks.get_all_values()
     except Exception:
         existing = []
     need_headers = len(existing) == 0
+
+    # Always write using explicit A1 ranges to start at column A
     try:
         if need_headers:
-            wks.append_row(headers, value_input_option='USER_ENTERED')
-        if hasattr(wks, 'append_rows'):
-            wks.append_rows(rows, value_input_option='USER_ENTERED')
-        else:
-            start_row = len(existing) + (1 if need_headers else 1)
-            wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
-    except Exception:
-        if need_headers:
+            wks.update("A1", [headers], value_input_option='USER_ENTERED')
+            existing = [headers]  # reflect header written
+        start_row = len(existing) + 1
+        wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
+    except Exception as e:
+        # Fallback: write each row explicitly to avoid alignment issues
+        try:
+            if need_headers:
+                wks.update("A1", [headers], value_input_option='USER_ENTERED')
+        except Exception:
+            pass
+        base_row = 2 if need_headers else len(existing) + 1
+        for i, r in enumerate(rows):
             try:
-                wks.append_row(headers, value_input_option='USER_ENTERED')
-            except Exception:
-                pass
-        for r in rows:
-            try:
-                wks.append_row(r, value_input_option='USER_ENTERED')
+                wks.update(f"A{base_row + i}", [r], value_input_option='USER_ENTERED')
             except Exception:
                 pass
 
