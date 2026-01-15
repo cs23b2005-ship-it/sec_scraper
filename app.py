@@ -1,6 +1,7 @@
 import requests
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
 # Add retry/backoff imports
@@ -402,8 +403,8 @@ def main():
                 time.sleep(0.2)
             df = pd.DataFrame(all_filings)
             if not df.empty:
-                # Insert Date and Time as first two columns
-                export_time = datetime.now().strftime("%H:%M")
+                # Insert Date and Time as first two columns (IST)
+                export_time = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%H:%M")
                 date_col = df.get("Filed")
                 formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
                 df.insert(0, "Date", formatted_dates)
