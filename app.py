@@ -246,35 +246,39 @@ def get_content_length(session, url, headers):
 
 def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
     sh = gc.open_by_key(spreadsheet_id)
-    wks = sh.worksheet(worksheet_title)
+    # Ensure worksheet exists; create if missing
+    try:
+        wks = sh.worksheet(worksheet_title)
+    except Exception:
+        try:
+            wks = sh.add_worksheet(title=worksheet_title, rows=100, cols=26)
+        except Exception as e:
+            raise e
+
     headers = list(df.columns)
     rows = df.astype(object).where(pd.notnull(df), "").values.tolist()
     try:
         existing = wks.get_all_values()
     except Exception:
         existing = []
-    # Write headers only if sheet is empty
     need_headers = len(existing) == 0
     try:
         if need_headers:
-            wks.append_row(headers, value_input_option='USER_ENTERED')
-        # Prefer append_rows API if available
-        if hasattr(wks, 'append_rows'):
-            wks.append_rows(rows, value_input_option='USER_ENTERED')
-        else:
-            # Fallback: update starting from next empty row
-            start_row = len(existing) + (1 if need_headers else 1)
-            wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
+            wks.update("A1", [headers], value_input_option='USER_ENTERED')
+            existing = [headers]
+        start_row = len(existing) + 1
+        wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception:
-        # Last-resort fallback: attempt batch appends one-by-one
-        if need_headers:
+        # Fallback: write row-by-row using explicit ranges
+        try:
+            if need_headers:
+                wks.update("A1", [headers], value_input_option='USER_ENTERED')
+        except Exception:
+            pass
+        base_row = 2 if need_headers else len(existing) + 1
+        for i, r in enumerate(rows):
             try:
-                wks.append_row(headers, value_input_option='USER_ENTERED')
-            except Exception:
-                pass
-        for r in rows:
-            try:
-                wks.append_row(r, value_input_option='USER_ENTERED')
+                wks.update(f"A{base_row + i}", [r], value_input_option='USER_ENTERED')
             except Exception:
                 pass
 
