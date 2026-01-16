@@ -1,7 +1,6 @@
 import requests
 import json
 from datetime import datetime, timedelta
-import yfinance as yf
 import streamlit as st
 import pandas as pd
 # Add retry/backoff imports
