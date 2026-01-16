@@ -1,6 +1,7 @@
 import requests
 import json
 from datetime import datetime, timedelta
+import yfinance as yf
 import streamlit as st
 import pandas as pd
 # Add retry/backoff imports
@@ -332,11 +333,6 @@ def main():
         if custom_types:
             filing_types_list.extend([x.strip().upper() for x in custom_types.split(',') if x.strip()])
 
-        # If nothing selected, fall back to common defaults so Fetch works
-        if not filing_types_list:
-            filing_types_list = ['10-K', '10-Q', '8-K']
-            st.caption("No filing types selected; using defaults: 10-K, 10-Q, 8-K")
-
         st.subheader("📄 Spreadsheet Connection")
         service_json_file = st.file_uploader("Google service account JSON", type=["json"], help="Upload service account credentials JSON for Sheets access")
         sheet_url = st.text_input("Spreadsheet URL:", help="Paste Google Sheets URL (https://docs.google.com/spreadsheets/d/...) to connect")
@@ -369,9 +365,10 @@ def main():
         if 'worksheet_names' in st.session_state and st.session_state.get('worksheet_names'):
             st.selectbox("Worksheet:", st.session_state['worksheet_names'], key="selected_worksheet")
             st.caption("The selected worksheet will be used for future exports.")
+            st.checkbox("Write results to spreadsheet", key="write_to_sheet")
         run_button = st.button("🔎 Fetch Filings", type="primary")
 
-    if run_button:
+    if run_button and len(filing_types_list) > 0:
         with st.spinner("Fetching SEC Filings..."):
             all_filings = []
             category = "custom"
@@ -404,11 +401,8 @@ def main():
                 formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
                 df.insert(0, "Date", formatted_dates)
                 df.insert(1, "Time", export_time)
-            if df.empty:
-                st.warning("No filings found for the selected criteria.")
-            else:
-                st.success(f"✅ Found {len(df)} filings matching your search.")
-                st.dataframe(df, use_container_width=True)
+            st.success(f"✅ Found {len(df)} filings matching your search.")
+            st.dataframe(df, use_container_width=True)
             if not df.empty:
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
@@ -418,9 +412,10 @@ def main():
                     mime='text/csv'
                 )
 
-            # Write to Google Sheet when connected
+            # Optional: write to Google Sheet when enabled and connected
             if (
                 not df.empty and
+                st.session_state.get('write_to_sheet') and
                 gspread is not None and Credentials is not None and
                 st.session_state.get('gspread_client') and
                 st.session_state.get('spreadsheet_id') and
