@@ -220,6 +220,29 @@ def col_to_letter(n):
         result.append(chr(65 + rem))
     return ''.join(reversed(result))
 
+def get_canonical_headers():
+    # Ensure header-only writes have consistent columns, matching data rows
+    return [
+        "Date",
+        "Time",
+        "Form",
+        "File",
+        "File description",
+        "URL",
+        "Filing Detail",
+        "size",
+        "Filed",
+        "Reporting For",
+        "Filing entity",
+        "Filing entity located",
+        "Filing entity incorporated",
+        "Filer name",
+        "Filer located",
+        "Filer incorporated",
+        "Symbol",
+        "CIK",
+    ]
+
 def format_bytes(n):
     try:
         n = int(n)
@@ -274,11 +297,15 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
 
     need_headers = len(existing) == 0
     try:
-        # If empty sheet, write headers explicitly to A1:Z1... based on column count
+        # If empty sheet, write headers explicitly to A1:{end_col}1 based on column count
         if need_headers:
             end_col = col_to_letter(len(headers))
             header_range = f"A1:{end_col}1"
             wks.update(header_range, [headers], value_input_option='USER_ENTERED')
+
+        # If there are no data rows (header-only), stop here
+        if len(rows) == 0:
+            return
 
         # Always start data at column A on the next available row
         start_row = 2 if need_headers else (len(existing) + 1)
@@ -439,21 +466,32 @@ def main():
                 )
 
             # Always write to Google Sheet when connected
-            if (
-                not df.empty and
+            connected = (
                 gspread is not None and Credentials is not None and
                 st.session_state.get('gspread_client') and
                 st.session_state.get('spreadsheet_id') and
                 st.session_state.get('selected_worksheet')
-            ):
+            )
+            if connected:
                 try:
-                    write_df_to_sheet(
-                        st.session_state['gspread_client'],
-                        st.session_state['spreadsheet_id'],
-                        st.session_state['selected_worksheet'],
-                        df
-                    )
-                    st.success("✅ Results written to the selected worksheet.")
+                    if df.empty:
+                        # Write only headers so the first row is set for future appends
+                        empty_df = pd.DataFrame(columns=get_canonical_headers())
+                        write_df_to_sheet(
+                            st.session_state['gspread_client'],
+                            st.session_state['spreadsheet_id'],
+                            st.session_state['selected_worksheet'],
+                            empty_df
+                        )
+                        st.info("ℹ️ No results, wrote headers to the worksheet.")
+                    else:
+                        write_df_to_sheet(
+                            st.session_state['gspread_client'],
+                            st.session_state['spreadsheet_id'],
+                            st.session_state['selected_worksheet'],
+                            df
+                        )
+                        st.success("✅ Results written to the selected worksheet.")
                 except Exception as e:
                     st.error(f"Failed to write to spreadsheet: {e}")
 
