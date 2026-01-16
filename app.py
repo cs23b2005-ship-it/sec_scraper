@@ -272,7 +272,13 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
     except Exception:
         existing = []
 
-    need_headers = len(existing) == 0
+    # Check if first row already has headers; if row 1 is empty, write headers
+    try:
+        header_row = wks.row_values(1)
+    except Exception:
+        header_row = []
+
+    need_headers = len(header_row) == 0
     try:
         # If empty sheet, write headers explicitly to A1:Z1... based on column count
         if need_headers:
@@ -282,7 +288,8 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
 
         # Always start data at column A on the next available row
         if rows:
-            start_row = 2 if need_headers else (len(existing) + 1)
+            # If sheet had no data previously, start at row 2; else append after last filled row
+            start_row = (2 if (need_headers and len(existing) == 0) else (len(existing) + 1))
             wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception:
         # Fallback: attempt batch appends one-by-one starting at column A
@@ -294,7 +301,8 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
             except Exception:
                 pass
         if rows:
-            for idx, r in enumerate(rows, start=(2 if need_headers else (len(existing) + 1))):
+            start_idx = (2 if (need_headers and len(existing) == 0) else (len(existing) + 1))
+            for idx, r in enumerate(rows, start=start_idx):
                 try:
                     wks.update(f"A{idx}", [r], value_input_option='USER_ENTERED')
                 except Exception:
