@@ -333,6 +333,11 @@ def main():
         if custom_types:
             filing_types_list.extend([x.strip().upper() for x in custom_types.split(',') if x.strip()])
 
+        # If nothing selected, fall back to common defaults so Fetch works
+        if not filing_types_list:
+            filing_types_list = ['10-K', '10-Q', '8-K']
+            st.caption("No filing types selected; using defaults: 10-K, 10-Q, 8-K")
+
         st.subheader("📄 Spreadsheet Connection")
         service_json_file = st.file_uploader("Google service account JSON", type=["json"], help="Upload service account credentials JSON for Sheets access")
         sheet_url = st.text_input("Spreadsheet URL:", help="Paste Google Sheets URL (https://docs.google.com/spreadsheets/d/...) to connect")
@@ -368,7 +373,7 @@ def main():
             st.checkbox("Write results to spreadsheet", key="write_to_sheet")
         run_button = st.button("🔎 Fetch Filings", type="primary")
 
-    if run_button and len(filing_types_list) > 0:
+    if run_button:
         with st.spinner("Fetching SEC Filings..."):
             all_filings = []
             category = "custom"
@@ -401,8 +406,11 @@ def main():
                 formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
                 df.insert(0, "Date", formatted_dates)
                 df.insert(1, "Time", export_time)
-            st.success(f"✅ Found {len(df)} filings matching your search.")
-            st.dataframe(df, use_container_width=True)
+            if df.empty:
+                st.warning("No filings found for the selected criteria.")
+            else:
+                st.success(f"✅ Found {len(df)} filings matching your search.")
+                st.dataframe(df, use_container_width=True)
             if not df.empty:
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
