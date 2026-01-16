@@ -1,7 +1,6 @@
 import requests
 import json
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
 # Add retry/backoff imports
@@ -247,44 +246,37 @@ def get_content_length(session, url, headers):
 
 def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
     sh = gc.open_by_key(spreadsheet_id)
-    # Ensure worksheet exists; create if missing
-    try:
-        wks = sh.worksheet(worksheet_title)
-    except Exception:
-        try:
-            wks = sh.add_worksheet(title=worksheet_title, rows=100, cols=26)
-        except Exception as e:
-            raise e
-
+    wks = sh.worksheet(worksheet_title)
     headers = list(df.columns)
     rows = df.astype(object).where(pd.notnull(df), "").values.tolist()
     try:
         existing = wks.get_all_values()
     except Exception:
         existing = []
+    # Write headers only if sheet is empty
     need_headers = len(existing) == 0
     try:
         if need_headers:
-            wks.update("A1", [headers], value_input_option='USER_ENTERED')
-            existing = [headers]
-        # Only write data rows if present
-        if rows:
-            start_row = len(existing) + 1
+            wks.append_row(headers, value_input_option='USER_ENTERED')
+        # Prefer append_rows API if available
+        if hasattr(wks, 'append_rows'):
+            wks.append_rows(rows, value_input_option='USER_ENTERED')
+        else:
+            # Fallback: update starting from next empty row
+            start_row = len(existing) + (1 if need_headers else 1)
             wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception:
-        # Fallback: write row-by-row using explicit ranges
-        try:
-            if need_headers:
-                wks.update("A1", [headers], value_input_option='USER_ENTERED')
-        except Exception:
-            pass
-        if rows:
-            base_row = 2 if need_headers else len(existing) + 1
-            for i, r in enumerate(rows):
-                try:
-                    wks.update(f"A{base_row + i}", [r], value_input_option='USER_ENTERED')
-                except Exception:
-                    pass
+        # Last-resort fallback: attempt batch appends one-by-one
+        if need_headers:
+            try:
+                wks.append_row(headers, value_input_option='USER_ENTERED')
+            except Exception:
+                pass
+        for r in rows:
+            try:
+                wks.append_row(r, value_input_option='USER_ENTERED')
+            except Exception:
+                pass
 
 def format_date_str(s):
     mon = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
@@ -405,22 +397,13 @@ def main():
                 # small pause to reduce rate-limit errors
                 time.sleep(0.2)
             df = pd.DataFrame(all_filings)
-            # Define canonical headers to support header-only writes when no filings
-            expected_headers = [
-                "Date", "Time", "Form", "File", "File description", "URL", "Filing Detail", "size",
-                "Filed", "Reporting For", "Filing entity", "Filing entity located", "Filing entity incorporated",
-                "Filer name", "Filer located", "Filer incorporated", "Symbol", "CIK"
-            ]
             if not df.empty:
-                # Insert Date and Time as first two columns (IST)
-                export_time = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%H:%M")
+                # Insert Date and Time as first two columns
+                export_time = datetime.now().strftime("%H:%M")
                 date_col = df.get("Filed")
                 formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
                 df.insert(0, "Date", formatted_dates)
                 df.insert(1, "Time", export_time)
-            else:
-                # Build empty DataFrame with expected headers so we can write header-only
-                df = pd.DataFrame(columns=expected_headers)
             if df.empty:
                 st.warning("No filings found for the selected criteria.")
             else:
@@ -437,6 +420,7 @@ def main():
 
             # Write to Google Sheet when connected
             if (
+                not df.empty and
                 gspread is not None and Credentials is not None and
                 st.session_state.get('gspread_client') and
                 st.session_state.get('spreadsheet_id') and
@@ -449,10 +433,7 @@ def main():
                         st.session_state['selected_worksheet'],
                         df
                     )
-                    if df.empty:
-                        st.info("📝 Wrote headers only to the selected worksheet (no filings).")
-                    else:
-                        st.success("✅ Results written to the selected worksheet.")
+                    st.success("✅ Results written to the selected worksheet.")
                 except Exception as e:
                     st.error(f"Failed to write to spreadsheet: {e}")
 
