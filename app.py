@@ -253,7 +253,7 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
         existing = wks.get_all_values()
     except Exception:
         existing = []
-    # Write headers only if sheet is empty
+    # Write headers only if sheet is empty, then start data on next row
     need_headers = len(existing) == 0
     try:
         if need_headers:
@@ -263,7 +263,8 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
             wks.append_rows(rows, value_input_option='USER_ENTERED')
         else:
             # Fallback: update starting from next empty row
-            start_row = len(existing) + (1 if need_headers else 1)
+            # If headers were just written to an empty sheet, begin data at row 2
+            start_row = (2 if need_headers else (len(existing) + 1))
             wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception:
         # Last-resort fallback: attempt batch appends one-by-one
@@ -369,7 +370,6 @@ def main():
         if 'worksheet_names' in st.session_state and st.session_state.get('worksheet_names'):
             st.selectbox("Worksheet:", st.session_state['worksheet_names'], key="selected_worksheet")
             st.caption("The selected worksheet will be used for future exports.")
-            st.checkbox("Write results to spreadsheet", key="write_to_sheet")
         run_button = st.button("🔎 Fetch Filings", type="primary")
 
     if run_button:
@@ -419,10 +419,9 @@ def main():
                     mime='text/csv'
                 )
 
-            # Optional: write to Google Sheet when enabled and connected
+            # Always write to Google Sheet when connected
             if (
                 not df.empty and
-                st.session_state.get('write_to_sheet') and
                 gspread is not None and Credentials is not None and
                 st.session_state.get('gspread_client') and
                 st.session_state.get('spreadsheet_id') and
