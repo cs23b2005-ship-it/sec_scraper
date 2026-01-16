@@ -212,6 +212,14 @@ def get_spreadsheet_id(url):
     m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url or "")
     return m.group(1) if m else None
 
+def col_to_letter(n):
+    # 1 -> A, 2 -> B, ..., 26 -> Z, 27 -> AA
+    result = []
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        result.append(chr(65 + rem))
+    return ''.join(reversed(result))
+
 def format_bytes(n):
     try:
         n = int(n)
@@ -246,36 +254,47 @@ def get_content_length(session, url, headers):
 
 def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
     sh = gc.open_by_key(spreadsheet_id)
-    wks = sh.worksheet(worksheet_title)
+    try:
+        wks = sh.worksheet(worksheet_title)
+    except Exception:
+        # Auto-create missing worksheet
+        try:
+            sh.add_worksheet(title=worksheet_title, rows=1000, cols=max(len(df.columns), 26))
+            wks = sh.worksheet(worksheet_title)
+        except Exception:
+            wks = sh.sheet1
+
     headers = list(df.columns)
     rows = df.astype(object).where(pd.notnull(df), "").values.tolist()
+
     try:
         existing = wks.get_all_values()
     except Exception:
         existing = []
-    # Write headers only if sheet is empty, then start data on next row
+
     need_headers = len(existing) == 0
     try:
+        # If empty sheet, write headers explicitly to A1:Z1... based on column count
         if need_headers:
-            wks.append_row(headers, value_input_option='USER_ENTERED')
-        # Prefer append_rows API if available
-        if hasattr(wks, 'append_rows'):
-            wks.append_rows(rows, value_input_option='USER_ENTERED')
-        else:
-            # Fallback: update starting from next empty row
-            # If headers were just written to an empty sheet, begin data at row 2
-            start_row = (2 if need_headers else (len(existing) + 1))
-            wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
+            end_col = col_to_letter(len(headers))
+            header_range = f"A1:{end_col}1"
+            wks.update(header_range, [headers], value_input_option='USER_ENTERED')
+
+        # Always start data at column A on the next available row
+        start_row = 2 if need_headers else (len(existing) + 1)
+        wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception:
-        # Last-resort fallback: attempt batch appends one-by-one
+        # Fallback: attempt batch appends one-by-one starting at column A
         if need_headers:
             try:
-                wks.append_row(headers, value_input_option='USER_ENTERED')
+                end_col = col_to_letter(len(headers))
+                header_range = f"A1:{end_col}1"
+                wks.update(header_range, [headers], value_input_option='USER_ENTERED')
             except Exception:
                 pass
-        for r in rows:
+        for idx, r in enumerate(rows, start=(2 if need_headers else (len(existing) + 1))):
             try:
-                wks.append_row(r, value_input_option='USER_ENTERED')
+                wks.update(f"A{idx}", [r], value_input_option='USER_ENTERED')
             except Exception:
                 pass
 
