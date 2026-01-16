@@ -281,8 +281,9 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
             wks.update(header_range, [headers], value_input_option='USER_ENTERED')
 
         # Always start data at column A on the next available row
-        start_row = 2 if need_headers else (len(existing) + 1)
-        wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
+        if rows:
+            start_row = 2 if need_headers else (len(existing) + 1)
+            wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
     except Exception:
         # Fallback: attempt batch appends one-by-one starting at column A
         if need_headers:
@@ -292,11 +293,12 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
                 wks.update(header_range, [headers], value_input_option='USER_ENTERED')
             except Exception:
                 pass
-        for idx, r in enumerate(rows, start=(2 if need_headers else (len(existing) + 1))):
-            try:
-                wks.update(f"A{idx}", [r], value_input_option='USER_ENTERED')
-            except Exception:
-                pass
+        if rows:
+            for idx, r in enumerate(rows, start=(2 if need_headers else (len(existing) + 1))):
+                try:
+                    wks.update(f"A{idx}", [r], value_input_option='USER_ENTERED')
+                except Exception:
+                    pass
 
 def format_date_str(s):
     mon = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
@@ -439,21 +441,37 @@ def main():
                 )
 
             # Always write to Google Sheet when connected
-            if (
-                not df.empty and
+            connected = (
                 gspread is not None and Credentials is not None and
                 st.session_state.get('gspread_client') and
                 st.session_state.get('spreadsheet_id') and
                 st.session_state.get('selected_worksheet')
-            ):
+            )
+            if connected:
                 try:
-                    write_df_to_sheet(
-                        st.session_state['gspread_client'],
-                        st.session_state['spreadsheet_id'],
-                        st.session_state['selected_worksheet'],
-                        df
-                    )
-                    st.success("✅ Results written to the selected worksheet.")
+                    if df.empty:
+                        # Header-only write to initialize a new tab
+                        HEADERS = [
+                            "Date","Time","Form","File","File description","URL","Filing Detail","size",
+                            "Filed","Reporting For","Filing entity","Filing entity located","Filing entity incorporated",
+                            "Filer name","Filer located","Filer incorporated","Symbol","CIK"
+                        ]
+                        empty_df = pd.DataFrame(columns=HEADERS)
+                        write_df_to_sheet(
+                            st.session_state['gspread_client'],
+                            st.session_state['spreadsheet_id'],
+                            st.session_state['selected_worksheet'],
+                            empty_df
+                        )
+                        st.info("Headers initialized in the selected worksheet.")
+                    else:
+                        write_df_to_sheet(
+                            st.session_state['gspread_client'],
+                            st.session_state['spreadsheet_id'],
+                            st.session_state['selected_worksheet'],
+                            df
+                        )
+                        st.success("✅ Results written to the selected worksheet.")
                 except Exception as e:
                     st.error(f"Failed to write to spreadsheet: {e}")
 
