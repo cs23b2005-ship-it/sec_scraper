@@ -328,6 +328,21 @@ def main():
     st.title("📊 SEC Filings Scraper (Fast API)")
     st.markdown("Use the official SEC API for fast, paginated keyword search.")
 
+    # Plain-text instructions on how to use the app (first page)
+    st.text(
+        """
+How to use this app:
+1) Enter a Document word or phrase to search within filings.
+2) Optionally enter a Company name, ticker, or CIK to filter results.
+3) Pick a Date Range (defaults to yesterday–today if left empty).
+4) Select Filing Types or check Custom Groups; you can also add custom types.
+5) (Optional) Connect Google Sheets: upload service account JSON, paste the Spreadsheet URL, and test the connection. Choose a worksheet for exports.
+6) Click "Fetch Filings" to retrieve results.
+7) Review the results table and use "Download as CSV" to save locally.
+8) If Google Sheets is connected, results (with Date and Time columns) are appended to the selected worksheet.
+        """
+    )
+
     with st.sidebar:
         st.header("🔍 Search Parameters")
         doc_search = st.text_input("Document word or phrase:", help="Search for specific text within filings")
