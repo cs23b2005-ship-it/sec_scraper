@@ -387,6 +387,7 @@ def main():
 
         st.subheader("⚙️ Options")
         include_sizes = st.checkbox("Include file sizes (slower)", value=False, help="Fetch Content-Length for each file. May be slow and sometimes times out.")
+        dedupe_links = st.checkbox("Remove duplicate links (by URL)", value=True, help="Keep only the first occurrence of each unique document URL.")
 
         st.subheader("📄 Spreadsheet Connection")
         service_json_file = st.file_uploader("Google service account JSON", type=["json"], help="Upload service account credentials JSON for Sheets access")
@@ -467,11 +468,57 @@ def main():
                 formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
                 df.insert(0, "Date", formatted_dates)
                 df.insert(1, "Time", export_time)
+                # Optionally remove duplicate links
+                if dedupe_links and "URL" in df.columns:
+                    before = len(df)
+                    df = df.drop_duplicates(subset=["URL"], keep="first").reset_index(drop=True)
+                    after = len(df)
+                    if before != after:
+                        st.caption(f"Removed {before - after} duplicate link(s) (by URL).")
             if df.empty:
                 st.warning(f"❌ No filings found. Try:\n- Wider date range (last 7-30 days instead of yesterday-today)\n- Different filing types\n- Broaden your search terms\n\nSearch criteria: Date={from_date} to {to_date}, Types={forms_str}, Q={doc_search or '(any)'}")
             else:
                 st.success(f"✅ Found {len(df)} filings matching your search.")
                 st.dataframe(df, use_container_width=True)
+                # Optional: process unique links one-by-one
+                process_btn = st.button("🔄 Process unique links", help="Fetch each unique link sequentially and summarize status and title.")
+                if process_btn:
+                    with st.spinner("Processing links..."):
+                        results = []
+                        headers = {
+                            "User-Agent": "sec-scraper/1.0 (contact: your-cs23b2005@iiitdm.ac.in)",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Encoding": "gzip, deflate",
+                            "Connection": "keep-alive",
+                        }
+                        sess = requests.Session()
+                        adapter = HTTPAdapter(max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429,500,502,503,504]))
+                        sess.mount('https://', adapter)
+                        urls = [u for u in df.get("URL", []) if isinstance(u, str) and u]
+                        for idx, u in enumerate(urls, start=1):
+                            status = None
+                            title = None
+                            try:
+                                r = sess.get(u, headers=headers, timeout=15)
+                                status = r.status_code
+                                if r.status_code == 200 and 'text/html' in r.headers.get('Content-Type','').lower():
+                                    text = r.text[:4000]
+                                    m = re.search(r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE|re.DOTALL)
+                                    if m:
+                                        title = re.sub(r"\s+", " ", m.group(1)).strip()
+                            except Exception as e:
+                                status = f"error: {str(e)[:80]}"
+                            results.append({"#": idx, "URL": u, "Status": status, "Title": title})
+                            time.sleep(0.15)
+                        df_links = pd.DataFrame(results)
+                        st.dataframe(df_links, use_container_width=True)
+                        csv_links = df_links.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download link results as CSV",
+                            data=csv_links,
+                            file_name=f"SEC_links_{from_date}_to_{to_date}.csv",
+                            mime='text/csv'
+                        )
             if not df.empty:
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
