@@ -36,7 +36,7 @@ def id_correction(id):
     second_part = id[1]
     return f"{first_part}/{second_part}"
 
-def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, entityName, size=100, sort=None, max_total_retries=2):
+def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, entityName, size=100, include_size=False, sort=None, max_total_retries=2):
     """
     Deterministic SEC search-index fetch with:
     - explicit 'from' and 'size'
@@ -69,11 +69,13 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
     if sort:
         params["sort"] = sort
 
+    # Filter empty values. If both q and entityName are empty, allow search by 'forms' only
     params = {k: v for k, v in params.items() if v not in (None, "", [])}
+    # NOTE: Do NOT force q="*"; the SEC endpoint returns zero hits when q="*".
 
     # Use a clear User-Agent (include contact) — replace contact token with your address if you have one
     headers = {
-        "User-Agent": "sec-scraper/1.0 (contact: abhishek2005.siva@.com)",
+        "User-Agent": "sec-scraper/1.0 (contact: your-email@example.com)",
         "Accept-Encoding": "gzip, deflate",
         "Accept": "application/json",
         "Connection": "keep-alive"
@@ -82,7 +84,7 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
     # Session with urllib3 Retry to handle low-level network retries
     session = requests.Session()
     retry = Retry(
-        total=3,
+        total=10,
         backoff_factor=0.5,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=frozenset(["GET", "POST"]),
@@ -96,6 +98,10 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
     while attempt < MAX_ATTEMPTS:
         attempt += 1
         try:
+            # Debug: show full request
+            if attempt == 1:
+                print(f"[extarct_data] REQUEST: {url}")
+                print(f"[extarct_data] PARAMS: {params}")
             resp = session.get(url, params=params, headers=headers, timeout=30)
         except Exception as e:
             print(f"[extarct_data] network exception attempt={attempt}: {e}")
@@ -181,9 +187,9 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
             symbol = checked_symbol(entity_list)
             cik = str(targte_data.get("ciks", [""])[0]) if targte_data.get("ciks") else ""
 
-            # Determine file size (human-readable)
+            # Determine file size (human-readable) — optional for performance/stability
             size_human = None
-            if url_out:
+            if include_size and url_out:
                 size_bytes = get_content_length(session, url_out, headers)
                 size_human = format_bytes(size_bytes) if size_bytes is not None else None
 
@@ -233,23 +239,16 @@ def format_bytes(n):
         size /= 1024
 
 def get_content_length(session, url, headers):
+    # Try a quick HEAD; avoid GET fallback to reduce timeouts and load
     try:
-        r = session.head(url, headers=headers, timeout=15, allow_redirects=True)
-        if r.status_code >= 200 and r.status_code < 300:
+        r = session.head(url, headers=headers, timeout=5, allow_redirects=True)
+        if 200 <= r.status_code < 300:
             cl = r.headers.get('Content-Length')
             if cl:
                 return int(cl)
-        # Fallback: try GET without downloading body fully
-        r = session.get(url, headers=headers, timeout=20, stream=True)
-        if r.status_code >= 200 and r.status_code < 300:
-            cl = r.headers.get('Content-Length')
-            if cl:
-                return int(cl)
-    except Exception as e:
-        try:
-            print(f"[size] error fetching size for {url}: {e}")
-        except Exception:
-            pass
+    except Exception:
+        # Quietly skip size if HEAD fails
+        return None
     return None
 
 def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
@@ -386,6 +385,9 @@ def main():
             filing_types_list = ['10-K', '10-Q', '8-K']
             st.caption("No filing types selected; using defaults: 10-K, 10-Q, 8-K")
 
+        st.subheader("⚙️ Options")
+        include_sizes = st.checkbox("Include file sizes (slower)", value=False, help="Fetch Content-Length for each file. May be slow and sometimes times out.")
+
         st.subheader("📄 Spreadsheet Connection")
         service_json_file = st.file_uploader("Google service account JSON", type=["json"], help="Upload service account credentials JSON for Sheets access")
         sheet_url = st.text_input("Spreadsheet URL:", help="Paste Google Sheets URL (https://docs.google.com/spreadsheets/d/...) to connect")
@@ -434,7 +436,19 @@ def main():
             while True:
                 from_ = (page - 1) * FILINGS_PER_PAGE
                 page_str = str(page)
-                data = extarct_data(doc_search, date_range_str, category, startdt, enddt, forms_str, page_str, from_, entityName, size=FILINGS_PER_PAGE)
+                data = extarct_data(
+                    doc_search,
+                    date_range_str,
+                    category,
+                    startdt,
+                    enddt,
+                    forms_str,
+                    page_str,
+                    from_,
+                    entityName,
+                    size=FILINGS_PER_PAGE,
+                    include_size=include_sizes,
+                )
                 if not data:
                     break
                 all_filings.extend(data)
@@ -454,7 +468,7 @@ def main():
                 df.insert(0, "Date", formatted_dates)
                 df.insert(1, "Time", export_time)
             if df.empty:
-                st.warning("No filings found for the selected criteria.")
+                st.warning(f"❌ No filings found. Try:\n- Wider date range (last 7-30 days instead of yesterday-today)\n- Different filing types\n- Broaden your search terms\n\nSearch criteria: Date={from_date} to {to_date}, Types={forms_str}, Q={doc_search or '(any)'}")
             else:
                 st.success(f"✅ Found {len(df)} filings matching your search.")
                 st.dataframe(df, use_container_width=True)
