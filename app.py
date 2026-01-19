@@ -9,6 +9,7 @@ from urllib3.util.retry import Retry
 import time
 import random
 import re
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 
 # Optional deps for Google Sheets connection
 try:
@@ -35,6 +36,27 @@ def id_correction(id):
     first_part = id[0].replace("-", "")
     second_part = id[1]
     return f"{first_part}/{second_part}"
+
+def normalize_url(u):
+    try:
+        if not isinstance(u, str):
+            return u
+        u = u.strip()
+        p = urlparse(u)
+        scheme = (p.scheme or 'https').lower()
+        netloc = (p.netloc or '').lower()
+        # remove default https port
+        if netloc.endswith(':443'):
+            netloc = netloc[:-4]
+        # collapse duplicate slashes in path
+        path = re.sub(r'/+', '/', p.path)
+        # drop fragment
+        fragment = ''
+        # sort query params for canonicalization
+        query = urlencode(sorted(parse_qsl(p.query, keep_blank_values=True)))
+        return urlunparse((scheme, netloc, path, p.params, query, fragment))
+    except Exception:
+        return u
 
 def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, entityName, size=100, include_size=False, sort=None, max_total_retries=2):
     """
@@ -194,6 +216,7 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
                 size_human = format_bytes(size_bytes) if size_bytes is not None else None
 
             master_data.append({
+                "Record ID": pre_targt.get("_id", ""),
                 "Form": form,
                 "File": file_type,
                 "File description": file_description,
@@ -426,6 +449,7 @@ def main():
     if run_button:
         with st.spinner("Fetching SEC Filings..."):
             all_filings = []
+            seen_ids = set()
             category = "custom"
             date_range_str = "custom"
             startdt = from_date.strftime("%Y-%m-%d")
@@ -452,8 +476,19 @@ def main():
                 )
                 if not data:
                     break
-                all_filings.extend(data)
-                st.write(f"Fetched page {page}, total records: {len(all_filings)}")
+                # Filter out duplicates across pages using record IDs (fallback to URL)
+                new_rows = []
+                for row in data:
+                    rid = row.get("Record ID") or row.get("URL")
+                    if rid and rid not in seen_ids:
+                        seen_ids.add(rid)
+                        new_rows.append(row)
+                # If no new rows, we've started repeating — stop to avoid duplicates
+                if not new_rows:
+                    st.info("Received a repeated page; stopping pagination to avoid duplicates.")
+                    break
+                all_filings.extend(new_rows)
+                st.write(f"Fetched page {page}, page new records: {len(new_rows)}, total unique: {len(all_filings)}")
                 # If fewer results than requested page size, we've reached the end
                 if len(data) < FILINGS_PER_PAGE:
                     break
@@ -468,13 +503,14 @@ def main():
                 formatted_dates = date_col.apply(format_date_str) if date_col is not None else pd.Series([format_date_str(None)] * len(df))
                 df.insert(0, "Date", formatted_dates)
                 df.insert(1, "Time", export_time)
-                # Optionally remove duplicate links
+                # Optionally remove duplicate links (canonicalized)
                 if dedupe_links and "URL" in df.columns:
+                    df["URL_norm"] = df["URL"].astype(str).map(normalize_url)
                     before = len(df)
-                    df = df.drop_duplicates(subset=["URL"], keep="first").reset_index(drop=True)
+                    df = df.drop_duplicates(subset=["URL_norm"], keep="first").reset_index(drop=True)
                     after = len(df)
                     if before != after:
-                        st.caption(f"Removed {before - after} duplicate link(s) (by URL).")
+                        st.caption(f"Removed {before - after} duplicate link(s) (by canonical URL).")
             if df.empty:
                 st.warning(f"❌ No filings found. Try:\n- Wider date range (last 7-30 days instead of yesterday-today)\n- Different filing types\n- Broaden your search terms\n\nSearch criteria: Date={from_date} to {to_date}, Types={forms_str}, Q={doc_search or '(any)'}")
             else:
@@ -483,34 +519,22 @@ def main():
                 # Optional: process unique links one-by-one
                 process_btn = st.button("🔄 Process unique links", help="Fetch each unique link sequentially and summarize status and title.")
                 if process_btn:
-                    with st.spinner("Processing links..."):
-                        results = []
-                        headers = {
-                            "User-Agent": "sec-scraper/1.0 (contact: your-cs23b2005@iiitdm.ac.in)",
-                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                            "Accept-Encoding": "gzip, deflate",
-                            "Connection": "keep-alive",
-                        }
-                        sess = requests.Session()
-                        adapter = HTTPAdapter(max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429,500,502,503,504]))
-                        sess.mount('https://', adapter)
-                        urls = [u for u in df.get("URL", []) if isinstance(u, str) and u]
-                        for idx, u in enumerate(urls, start=1):
-                            status = None
-                            title = None
-                            try:
-                                r = sess.get(u, headers=headers, timeout=15)
-                                status = r.status_code
-                                if r.status_code == 200 and 'text/html' in r.headers.get('Content-Type','').lower():
-                                    text = r.text[:4000]
-                                    m = re.search(r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE|re.DOTALL)
-                                    if m:
-                                        title = re.sub(r"\s+", " ", m.group(1)).strip()
-                            except Exception as e:
-                                status = f"error: {str(e)[:80]}"
-                            results.append({"#": idx, "URL": u, "Status": status, "Title": title})
-                            time.sleep(0.15)
-                        df_links = pd.DataFrame(results)
+                    # Build a canonical unique URL list to avoid double processing
+                    urls_series = df.get("URL", [])
+                    url_map = {}
+                    for u in urls_series:
+                        if isinstance(u, str) and u:
+                            nu = normalize_url(u)
+                            if nu not in url_map:
+                                url_map[nu] = u
+                    urls = list(url_map.values())
+
+                    # Create a signature of this run to avoid immediate duplicate processing
+                    link_run_sig = f"{from_date}_{to_date}_{forms_str}_{doc_search}_{len(urls)}"
+                    cached_sig = st.session_state.get('last_link_run_sig')
+                    cached_res = st.session_state.get('link_results')
+                    if cached_sig == link_run_sig and cached_res:
+                        df_links = pd.DataFrame(cached_res)
                         st.dataframe(df_links, use_container_width=True)
                         csv_links = df_links.to_csv(index=False).encode('utf-8')
                         st.download_button(
@@ -519,6 +543,51 @@ def main():
                             file_name=f"SEC_links_{from_date}_to_{to_date}.csv",
                             mime='text/csv'
                         )
+                    else:
+                        # guard against double-run during rerender
+                        if st.session_state.get('processing_links'):
+                            st.info("Already processing links...")
+                        else:
+                            st.session_state['processing_links'] = True
+                            with st.spinner("Processing links..."):
+                                results = []
+                                headers = {
+                                    "User-Agent": "sec-scraper/1.0 (contact: your-cs23b2005@iiitdm.ac.in)",
+                                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                    "Accept-Encoding": "gzip, deflate",
+                                    "Connection": "keep-alive",
+                                }
+                                sess = requests.Session()
+                                adapter = HTTPAdapter(max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429,500,502,503,504]))
+                                sess.mount('https://', adapter)
+                                for idx, u in enumerate(urls, start=1):
+                                    status = None
+                                    title = None
+                                    try:
+                                        r = sess.get(u, headers=headers, timeout=15)
+                                        status = r.status_code
+                                        if r.status_code == 200 and 'text/html' in r.headers.get('Content-Type','').lower():
+                                            text = r.text[:4000]
+                                            m = re.search(r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE|re.DOTALL)
+                                            if m:
+                                                title = re.sub(r"\s+", " ", m.group(1)).strip()
+                                    except Exception as e:
+                                        status = f"error: {str(e)[:80]}"
+                                    results.append({"#": idx, "URL": u, "Status": status, "Title": title})
+                                    time.sleep(0.15)
+                                df_links = pd.DataFrame(results)
+                                st.dataframe(df_links, use_container_width=True)
+                                csv_links = df_links.to_csv(index=False).encode('utf-8')
+                                st.download_button(
+                                    label="📥 Download link results as CSV",
+                                    data=csv_links,
+                                    file_name=f"SEC_links_{from_date}_to_{to_date}.csv",
+                                    mime='text/csv'
+                                )
+                                # cache results/signature to avoid immediate duplicate runs
+                                st.session_state['link_results'] = results
+                                st.session_state['last_link_run_sig'] = link_run_sig
+                            st.session_state['processing_links'] = False
             if not df.empty:
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
