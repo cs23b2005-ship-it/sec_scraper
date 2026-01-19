@@ -75,7 +75,7 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
 
     # Use a clear User-Agent (include contact) — replace contact token with your address if you have one
     headers = {
-        "User-Agent": "sec-scraper/1.0 (contact: your-abhishek2005.siva@gmail.com)",
+        "User-Agent": "sec-scraper/1.0 (contact: your-cs23b2005.siva@iiitdm.ac.in)",
         "Accept-Encoding": "gzip, deflate",
         "Accept": "application/json",
         "Connection": "keep-alive"
