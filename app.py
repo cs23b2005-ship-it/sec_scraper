@@ -607,8 +607,8 @@ def get_input_url_rows(gc, spreadsheet_url: str, input_tab_name: str) -> List[Tu
     except Exception:
         return []
 
-def setup_revised_output_tab(gc, spreadsheet_url: str, urls: List[str], tab_name: str = "revised output"):
-    """Create or clear 'revised output' tab and write the de-duplicated URLs in column A (header 'url')."""
+def setup_revised_output_tab(gc, spreadsheet_url: str, urls: List[str], tab_name: str = "revised input"):
+    """Create or clear 'revised input' tab and write the de-duplicated URLs in column A (header 'url')."""
     try:
         spreadsheet = gc.open_by_url(spreadsheet_url)
         try:
@@ -627,10 +627,10 @@ def setup_revised_output_tab(gc, spreadsheet_url: str, urls: List[str], tab_name
             rows = [[u] for u in urls]
             # Write starting at A2
             worksheet.update(f'A2', rows, value_input_option='USER_ENTERED')
-        log(f"Revised output tab '{tab_name}' populated with {len(urls)} unique URLs.")
+        log(f"revised input tab '{tab_name}' populated with {len(urls)} unique URLs.")
         return worksheet
     except Exception as e:
-        st.warning(f"Failed to setup revised output tab: {e}")
+        st.warning(f"Failed to setup revised input tab: {e}")
         return None
 
 def write_result_to_sheet_row(worksheet, row_index: int, result: Dict) -> bool:
@@ -2080,7 +2080,7 @@ def main():
 
             # Skip write probes to avoid modifying existing cells; errors will surface during append
 
-            # Build URL→row index map from input tab and create revised output tab
+            # Build URL→row index map from input tab and create revised input tab
             url_rows = get_input_url_rows(st.session_state.gc, spreadsheet_url, input_tab_name)
             url_row_map: Dict[str, int] = {}
             for u, idx in url_rows:
@@ -2091,7 +2091,7 @@ def main():
             for u in urls:
                 if u in url_row_map and u not in url_order:
                     url_order.append(u)
-            # Populate revised output tab with unique URLs
+            # Populate revised input tab with unique URLs
             setup_revised_output_tab(st.session_state.gc, spreadsheet_url, url_order)
 
             # Process filings concurrently, assigning one URL per API key
