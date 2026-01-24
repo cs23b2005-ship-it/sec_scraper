@@ -218,6 +218,7 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
                 size_human = format_bytes(size_bytes) if size_bytes is not None else None
 
             master_data.append({
+                "Record ID": pre_targt.get("_id", ""),
                 "Form": form,
                 "File": file_type,
                 "File description": file_description,
@@ -328,9 +329,10 @@ def main():
     doc_search = doc_env.strip() if doc_env else ""
     entity_search = entity_env.strip() if entity_env else ""
 
-    # Date range: strictly yesterday (UTC) only
+    # Date range: configurable window ending yesterday (UTC)
+    days_back = int(os.getenv("DAYS_BACK", "3"))  # default 3-day window
     yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
-    from_date = yesterday
+    from_date = yesterday - timedelta(days=days_back - 1)
     to_date = yesterday
 
     date_range_str = "custom"
@@ -340,7 +342,10 @@ def main():
     FILINGS_PER_PAGE = int(os.getenv("PAGE_SIZE", "100"))
 
     print(f"Filters: forms='{forms_str}', doc='{doc_search}', entity='{entity_search}'")
+    print(f"Date window: {from_date} to {to_date} (days_back={days_back})")
+
     all_filings = []
+    seen_ids = set()
     while True:
         from_ = (page - 1) * FILINGS_PER_PAGE
         page_str = str(page)
@@ -358,8 +363,18 @@ def main():
         )
         if not data:
             break
-        all_filings.extend(data)
-        print(f"Fetched page {page}, total records: {len(all_filings)}")
+        # Deduplicate across pages by Record ID (fallback to URL)
+        new_rows = []
+        for row in data:
+            rid = row.get("Record ID") or row.get("URL")
+            if rid and rid not in seen_ids:
+                seen_ids.add(rid)
+                new_rows.append(row)
+        if not new_rows:
+            print("Reached repeated page; stopping pagination to avoid duplicates.")
+            break
+        all_filings.extend(new_rows)
+        print(f"Fetched page {page}, page new records: {len(new_rows)}, total unique: {len(all_filings)}")
         if len(data) < FILINGS_PER_PAGE:
             break
         page += 1
