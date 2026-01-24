@@ -83,8 +83,15 @@ def get_content_length(session, url, headers):
 
 
 def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, entityName, size=100, sort=None, max_total_retries=2):
+    """
+    Deterministic SEC search-index fetch with:
+    - explicit 'from' and 'size'
+    - session-level retries for HTTP errors
+    - additional manual retries with exponential backoff/jitter for transient 5xx/504/429 and JSON errors
+    """
     url = "https://efts.sec.gov/LATEST/search-index"
 
+    # normalize page/from
     try:
         page_int = int(page) if page is not None else 1
     except:
@@ -110,6 +117,7 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
 
     params = {k: v for k, v in params.items() if v not in (None, "", [])}
 
+    # Use a clear User-Agent (include contact) — replace contact token with your address if you have one
     headers = {
         "User-Agent": "sec-scraper/1.0 (contact: abhishek2005.siva@gmail.com)",
         "Accept-Encoding": "gzip, deflate",
@@ -117,6 +125,7 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
         "Connection": "keep-alive"
     }
 
+    # Session with urllib3 Retry to handle low-level network retries
     session = requests.Session()
     retry = Retry(
         total=3,
@@ -213,9 +222,6 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
             cik = str(targte_data.get("ciks", [""])[0]) if targte_data.get("ciks") else ""
 
             size_human = None
-            if url_out:
-                size_bytes = get_content_length(session, url_out, headers)
-                size_human = format_bytes(size_bytes) if size_bytes is not None else None
 
             master_data.append({
                 "Record ID": pre_targt.get("_id", ""),
@@ -224,14 +230,13 @@ def extarct_data(q, date_range, category, startdt, enddt, forms, page, from_, en
                 "File description": file_description,
                 "URL": url_out,
                 "Filing Detail": filing_detail_url,
-                "size": size_human,
                 "Filed": file_date,
                 "Reporting For": repotring_for,
                 "Filing entity": company_name,
-                "Filing entity located": None,
+                "Filing entity located": targte_data.get("biz_locations",[None])[0] if targte_data.get("biz_locations") else None,
                 "Filing entity incorporated": None,
-                "Filer name": None,
-                "Filer located": None,
+                "Filer name": targte_data.get("display_names", [""])[-1] if len(targte_data.get("display_names", [])) > 1 else None,
+                "Filer located": targte_data.get("biz_locations", [None])[-1] if len(targte_data.get("biz_locations", [])) > 1 else None,
                 "Filer incorporated": None,
                 "Symbol": symbol,
                 "CIK": cik
@@ -383,7 +388,7 @@ def main():
     df = pd.DataFrame(all_filings)
     # Define canonical headers so we can write header-only when there are no filings
     expected_headers = [
-        "Date", "Time", "Form", "File", "File description", "URL", "Filing Detail", "size",
+        "Date", "Time", "Form", "File", "File description", "URL", "Filing Detail",
         "Filed", "Reporting For", "Filing entity", "Filing entity located", "Filing entity incorporated",
         "Filer name", "Filer located", "Filer incorporated", "Symbol", "CIK"
     ]
