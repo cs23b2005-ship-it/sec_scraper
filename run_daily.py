@@ -302,40 +302,41 @@ def write_df_to_sheet(gc, spreadsheet_id, worksheet_title, df):
     try:
         if first_row_empty:
             end_col = col_letter(len(headers)) if headers else "A"
-            wks.update(f"A1:{end_col}1", [headers], value_input_option='USER_ENTERED')
+            wks.update(range_name=f"A1:{end_col}1", values=[headers], value_input_option='USER_ENTERED')
         # Only write data rows if there are any
         if rows:
             # If sheet was previously empty and we just wrote headers, start at row 2; else append after last non-empty row
             start_row = 2 if (first_row_empty and len(existing) == 0) else (len(existing) + 1)
-            wks.update(f"A{start_row}", rows, value_input_option='USER_ENTERED')
+            wks.update(range_name=f"A{start_row}", values=rows, value_input_option='USER_ENTERED')
     except Exception as e:
         # Fallback: write each row explicitly to avoid alignment issues
+        print(f"[write] Primary write failed: {e}, trying fallback...")
         try:
             if first_row_empty:
                 end_col = col_letter(len(headers)) if headers else "A"
-                wks.update(f"A1:{end_col}1", [headers], value_input_option='USER_ENTERED')
-        except Exception:
-            pass
+                wks.update(range_name=f"A1:{end_col}1", values=[headers], value_input_option='USER_ENTERED')
+        except Exception as ex:
+            print(f"[write] Header fallback failed: {ex}")
         if rows:
             base_row = 2 if (first_row_empty and len(existing) == 0) else (len(existing) + 1)
             for i, r in enumerate(rows):
                 try:
-                    wks.update(f"A{base_row + i}", [r], value_input_option='USER_ENTERED')
-                except Exception:
-                    pass
+                    wks.update(range_name=f"A{base_row + i}", values=[r], value_input_option='USER_ENTERED')
+                except Exception as ex:
+                    print(f"[write] Row {base_row + i} failed: {ex}")
 
 
 def main():
     # Defaults with robust env handling: ignore empty strings
     forms_env = os.getenv("FORMS", "").strip()
-    forms_str = forms_env if forms_env else "10-K,10-Q,8-K,DEF 14A"
+    forms_str = forms_env if forms_env else "8-K"
     doc_env = os.getenv("DOC_SEARCH", "")
     entity_env = os.getenv("ENTITY_SEARCH", "")
     doc_search = doc_env.strip() if doc_env else ""
     entity_search = entity_env.strip() if entity_env else ""
 
-    # Date range: configurable window ending yesterday (UTC)
-    days_back = int(os.getenv("DAYS_BACK", "3"))  # default 3-day window
+    # Date range: only yesterday (UTC)
+    days_back = int(os.getenv("DAYS_BACK", "1"))  # default 1-day window (yesterday only)
     yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
     from_date = yesterday - timedelta(days=days_back - 1)
     to_date = yesterday
@@ -392,6 +393,14 @@ def main():
         "Filed", "Reporting For", "Filing entity", "Filing entity located", "Filing entity incorporated",
         "Filer name", "Filer located", "Filer incorporated", "Symbol", "CIK"
     ]
+    
+    # Diagnostic: check for duplicate Record IDs or forms distribution
+    if not df.empty:
+        print(f"\nDiagnostic info:")
+        print(f"  Total records: {len(df)}")
+        print(f"  Unique Record IDs: {df['Record ID'].nunique()}")
+        print(f"  Forms distribution: {df['Form'].value_counts().to_dict()}")
+    
     if not df.empty:
         # Allow override via env var for testing (formats: HH:MM or h:mm AM/PM)
         def _parse_time_override(s: str) -> str | None:
